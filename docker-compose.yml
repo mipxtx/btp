@@ -1,0 +1,7 @@
+services:
+  click:
+    image: yandex/clickhouse-server
+    volumes:
+      - ./click_data:/var/lib/clickhouse
+    ports:
+      - 8123:8123
