@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,32 +27,42 @@ type Packet struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params"`
-	Id 		int				`json:"id"`
+	Id      int             `json:"id"`
 }
 
 type Result struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	Result  json.RawMessage `json:"result"`
-	Id 		int				`json:"id"`
+	Id      int             `json:"id"`
 }
 
 type Error struct {
 	Jsonrpc string          `json:"jsonrpc"`
 	Error   json.RawMessage `json:"result"`
-	Id 		int				`json:"id"`
+	Id      int             `json:"id"`
 }
 
-type MethodError struct{
+type MethodError struct {
 	error string
 }
-func (m MethodError) Error() (string) {
+
+func (m MethodError) Error() string {
 	return m.error
 }
 
 var data string = ""
 var btpMutex sync.Mutex
 
+var clickhost string = ""
+
 func main() {
+	fmt.Println("started")
+	val, exists := os.LookupEnv("CLICK")
+	if !exists {
+		//log.Fatal("CLICK not set")
+	}
+	fmt.Println("CLICK: " + val)
+	clickhost = val
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -65,7 +76,7 @@ func main() {
 func serveTCP(port int, wg sync.WaitGroup) {
 	defer wg.Done()
 	// listen to incoming udp packets
-	lc, err := net.Listen("tcp", ":" + strconv.Itoa(port))
+	lc, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Fatal("tcp listen err:" + err.Error())
 	}
@@ -82,18 +93,17 @@ func serveTCP(port int, wg sync.WaitGroup) {
 	}
 }
 
-func tcpAcept(conn net.Conn){
+func tcpAcept(conn net.Conn) {
 	// Будем прослушивать все сообщения разделенные \n
 	message, _ := bufio.NewReader(conn).ReadString('\n')
 	result := append(serveMethod([]byte(message)), '\n')
 	conn.Write(result)
 }
 
-
-func serveUdp(port int, wg sync.WaitGroup){
+func serveUdp(port int, wg sync.WaitGroup) {
 	defer wg.Done()
 
-	conn, err := net.ListenPacket("udp", ":" + strconv.Itoa(port))
+	conn, err := net.ListenPacket("udp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Fatal("udp listen err:" + err.Error())
 	}
@@ -109,45 +119,45 @@ func serveUdp(port int, wg sync.WaitGroup){
 	}
 }
 
-func udpProcess(message []byte , dst net.Addr){
+func udpProcess(message []byte, dst net.Addr) {
 	serveMethod(message)
 }
 
-func serveMethod(buf []byte) (json.RawMessage){
+func serveMethod(buf []byte) json.RawMessage {
+	fmt.Println(string(buf))
 	message := Packet{}
 	unerr := json.Unmarshal(buf, &message)
 	if unerr != nil {
 		fmt.Println(unerr)
-		jsonError := Error{Jsonrpc: "2.0", Error: json.RawMessage("parser error"), Id:-32768}
-		jsonResp,_ := json.Marshal(jsonError)
+		jsonError := Error{Jsonrpc: "2.0", Error: json.RawMessage("parser error"), Id: -32768}
+		jsonResp, _ := json.Marshal(jsonError)
 		return jsonResp
 	}
 
 	switch message.Method {
 	case "multi_add":
-		return result(processMulti(message.Params,message.Id))
-	case "dump" :
+		return result(processMulti(message.Params, message.Id))
+	case "dump":
 		return result(clickSend(message.Id))
 
-		
 	default:
-		return result(nil,MethodError{error: "method '" + message.Method + "' unknown"}, message.Id)
+		return result(nil, MethodError{error: "method '" + message.Method + "' unknown"}, message.Id)
 	}
 }
 
 func result(success json.RawMessage, err error, id int) json.RawMessage {
 
-	if(err != nil){
+	if err != nil {
 		jsonError := Error{Jsonrpc: "2.0", Error: json.RawMessage(err.Error())}
-		if(id != 0){
-			jsonError.Id = id;
+		if id != 0 {
+			jsonError.Id = id
 		}
-		jsonResp,_ := json.Marshal(jsonError)
+		jsonResp, _ := json.Marshal(jsonError)
 		return jsonResp
-	}else{
+	} else {
 		jsonResult := Result{Jsonrpc: "2.0", Result: success}
-		if(id != 0){
-			jsonResult.Id = id;
+		if id != 0 {
+			jsonResult.Id = id
 		}
 		jsonResp, _ := json.Marshal(jsonResult)
 		return jsonResp
@@ -155,7 +165,7 @@ func result(success json.RawMessage, err error, id int) json.RawMessage {
 
 }
 
-func processMulti(message json.RawMessage, id int) (json.RawMessage,  error, int){
+func processMulti(message json.RawMessage, id int) (json.RawMessage, error, int) {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	out := ""
 	jdata := MultiAdd{}
@@ -184,11 +194,11 @@ func processMulti(message json.RawMessage, id int) (json.RawMessage,  error, int
 	data += out
 	btpMutex.Unlock()
 
-	succ,_:= json.Marshal("success")
-	return succ,err,id
+	succ, _ := json.Marshal("success")
+	return succ, err, id
 }
 
-func clickSend(id int) (json.RawMessage, error, int){
+func clickSend(id int) (json.RawMessage, error, int) {
 	btpMutex.Lock()
 	str := data
 	data = ""
@@ -196,7 +206,7 @@ func clickSend(id int) (json.RawMessage, error, int){
 	params := url.Values{}
 	params.Add("query", "INSERT INTO btp.timer FORMAT TabSeparated")
 
-	url := "http://127.0.0.1:8123/?" + params.Encode()
+	url := "http://" + clickhost + "/?" + params.Encode()
 	fmt.Println(url)
 	r := bytes.NewReader([]byte(str))
 	resp, err := http.Post(url, "text/plain; charset=UTF-8", r)
@@ -207,9 +217,6 @@ func clickSend(id int) (json.RawMessage, error, int){
 	if resp.StatusCode != 200 {
 		return nil, MethodError{error: resp.Status}, id
 	}
-	succ,_ := json.Marshal("success")
+	succ, _ := json.Marshal("success")
 	return succ, err, id
 }
-
-
-

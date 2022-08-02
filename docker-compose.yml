@@ -5,3 +5,14 @@ services:
       - ./click_data:/var/lib/clickhouse
     ports:
       - 8123:8123
+  listner:
+    #build : ./listner
+    image: listner
+    ports:
+      - 12345:12345
+      - 12345:12345/udp
+    links:
+      - click
+    environment:
+      - "CLICK=click:8123"
+
