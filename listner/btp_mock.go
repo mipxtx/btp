@@ -10,9 +10,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -37,9 +39,9 @@ type Result struct {
 }
 
 type Error struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	Error   json.RawMessage `json:"result"`
-	Id      int             `json:"id"`
+	Jsonrpc string `json:"jsonrpc"`
+	Error   string `json:"error"`
+	Id      int    `json:"id"`
 }
 
 type MethodError struct {
@@ -56,24 +58,69 @@ var btpMutex sync.Mutex
 var clickhost string = ""
 
 func main() {
-	fmt.Println("started")
+
 	val, exists := os.LookupEnv("CLICK")
 	if !exists {
-		//log.Fatal("CLICK not set")
+		log.Fatal("CLICK not set")
 	}
 	fmt.Println("CLICK: " + val)
 	clickhost = val
 
+	val, exists = os.LookupEnv("DUMP_TIMEOUT")
+	if !exists {
+		log.Fatal("DUMP_TIMEOUT not set")
+	}
+
+	dumpTimeout, _ := strconv.Atoi(val)
+	if dumpTimeout < 1 {
+		log.Fatal("DUMP_TIMEOUT must be grater then 0")
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go serveUdp(12345, wg)
+	go serveUdp(12345, &wg)
 	wg.Add(1)
-	go serveTCP(12345, wg)
+	go serveTCP(12345, &wg)
+	wg.Add(1)
+	go serveTimers(dumpTimeout, &wg)
 	wg.Wait()
 
 }
 
-func serveTCP(port int, wg sync.WaitGroup) {
+// We make sigHandler receive a channel on which we will report the value of var quit
+func sigHandler(q chan bool) {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+	for s := range c {
+		switch s {
+		case syscall.SIGINT, syscall.SIGTERM:
+			q <- true
+			os.Exit(0)
+		}
+	}
+
+}
+
+func serveTimers(timeout int, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	sig := make(chan bool)
+	go sigHandler(sig)
+
+	ticker := time.NewTicker(time.Duration(timeout) * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = dump()
+		case <-sig:
+			fmt.Println("exit")
+			return
+		}
+	}
+}
+
+func serveTCP(port int, wg *sync.WaitGroup) {
 	defer wg.Done()
 	// listen to incoming udp packets
 	lc, err := net.Listen("tcp", ":"+strconv.Itoa(port))
@@ -89,18 +136,17 @@ func serveTCP(port int, wg sync.WaitGroup) {
 		}
 		defer conn.Close()
 
-		go tcpAcept(conn)
+		go tcpAccept(conn)
 	}
 }
 
-func tcpAcept(conn net.Conn) {
-	// Будем прослушивать все сообщения разделенные \n
+func tcpAccept(conn net.Conn) {
 	message, _ := bufio.NewReader(conn).ReadString('\n')
 	result := append(serveMethod([]byte(message)), '\n')
 	conn.Write(result)
 }
 
-func serveUdp(port int, wg sync.WaitGroup) {
+func serveUdp(port int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	conn, err := net.ListenPacket("udp", ":"+strconv.Itoa(port))
@@ -124,23 +170,21 @@ func udpProcess(message []byte, dst net.Addr) {
 }
 
 func serveMethod(buf []byte) json.RawMessage {
-	fmt.Println(string(buf))
 	message := Packet{}
 	unerr := json.Unmarshal(buf, &message)
 	if unerr != nil {
 		fmt.Println(unerr)
-		jsonError := Error{Jsonrpc: "2.0", Error: json.RawMessage("parser error"), Id: -32768}
+		jsonError := Error{Jsonrpc: "2.0", Error: "parser error", Id: -32768}
 		jsonResp, _ := json.Marshal(jsonError)
 		return jsonResp
 	}
-
 	switch message.Method {
 	case "multi_add":
 		return result(processMulti(message.Params, message.Id))
 	case "dump":
 		return result(clickSend(message.Id))
-
 	default:
+		fmt.Println(string(buf))
 		return result(nil, MethodError{error: "method '" + message.Method + "' unknown"}, message.Id)
 	}
 }
@@ -148,7 +192,7 @@ func serveMethod(buf []byte) json.RawMessage {
 func result(success json.RawMessage, err error, id int) json.RawMessage {
 
 	if err != nil {
-		jsonError := Error{Jsonrpc: "2.0", Error: json.RawMessage(err.Error())}
+		jsonError := Error{Jsonrpc: "2.0", Error: err.Error()}
 		if id != 0 {
 			jsonError.Id = id
 		}
@@ -162,7 +206,6 @@ func result(success json.RawMessage, err error, id int) json.RawMessage {
 		jsonResp, _ := json.Marshal(jsonResult)
 		return jsonResp
 	}
-
 }
 
 func processMulti(message json.RawMessage, id int) (json.RawMessage, error, int) {
@@ -199,6 +242,16 @@ func processMulti(message json.RawMessage, id int) (json.RawMessage, error, int)
 }
 
 func clickSend(id int) (json.RawMessage, error, int) {
+
+	err := dump()
+	if err != nil {
+		return nil, err, id
+	}
+	succ, _ := json.Marshal("success")
+	return succ, err, id
+}
+
+func dump() error {
 	btpMutex.Lock()
 	str := data
 	data = ""
@@ -207,16 +260,15 @@ func clickSend(id int) (json.RawMessage, error, int) {
 	params.Add("query", "INSERT INTO btp.timer FORMAT TabSeparated")
 
 	url := "http://" + clickhost + "/?" + params.Encode()
-	fmt.Println(url)
+	//fmt.Println(url)
 	r := bytes.NewReader([]byte(str))
 	resp, err := http.Post(url, "text/plain; charset=UTF-8", r)
 	if err != nil {
-		return nil, err, id
+		return err
 
 	}
 	if resp.StatusCode != 200 {
-		return nil, MethodError{error: resp.Status}, id
+		return MethodError{error: resp.Status}
 	}
-	succ, _ := json.Marshal("success")
-	return succ, err, id
+	return nil
 }

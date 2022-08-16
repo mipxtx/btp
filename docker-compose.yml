@@ -1,4 +1,19 @@
 services:
+  btp-front:
+    build: btp-front
+    ports:
+      - "80:80"
+    links:
+      - btp-php
+    volumes:
+      - ./logs/nginx:/var/log/nginx
+  btp-php:
+    #build: btp-php
+    image: btp:php
+    links:
+      - listner
+    volumes:
+      - ./logs/php:/var/log/
   click:
     image: yandex/clickhouse-server
     volumes:
@@ -7,7 +22,7 @@ services:
       - 8123:8123
   listner:
     #build : ./listner
-    image: listner
+    image: btp:mock
     ports:
       - 12345:12345
       - 12345:12345/udp
@@ -15,4 +30,5 @@ services:
       - click
     environment:
       - "CLICK=click:8123"
+      - "DUMP_TIMEOUT=15"
 
