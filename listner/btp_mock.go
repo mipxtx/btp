@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -17,6 +18,31 @@ import (
 	"syscall"
 	"time"
 )
+
+type NameTree struct {
+	Prefix string `json:"prefix"`
+	Depth  int    `json:"depth"`
+	Sep    string `json:"sep"`
+	Ntype  string `json:"ntype"`
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+	Sortby string `json:"sortby"`
+	Power  bool   `json:"power"`
+}
+
+type ClickLeaf struct {
+	Meta []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	} `json:"meta"`
+	Data       [][]string `json:"data"`
+	Rows       int        `json:"rows"`
+	Statistics struct {
+		Elapsed   float64 `json:"elapsed"`
+		RowsRead  int     `json:"rows_read"`
+		BytesRead int     `json:"bytes_read"`
+	} `json:"statistics"`
+}
 
 type MultiAdd struct {
 	Data []struct {
@@ -42,6 +68,10 @@ type Error struct {
 	Jsonrpc string `json:"jsonrpc"`
 	Error   string `json:"error"`
 	Id      int    `json:"id"`
+}
+
+type NameTreeResult struct {
+	Branches []string `json:"branches"`
 }
 
 type MethodError struct {
@@ -183,6 +213,10 @@ func serveMethod(buf []byte) json.RawMessage {
 		return result(processMulti(message.Params, message.Id))
 	case "dump":
 		return result(clickSend(message.Id))
+	case "get_name_tree":
+		return result(get_name_tree(message.Params, message.Id))
+	case "multi_get":
+		return result(multi_get(message.Params, message.Id))
 	default:
 		fmt.Println(string(buf))
 		return result(nil, MethodError{error: "method '" + message.Method + "' unknown"}, message.Id)
@@ -258,9 +292,7 @@ func dump() error {
 	btpMutex.Unlock()
 	params := url.Values{}
 	params.Add("query", "INSERT INTO btp.timer FORMAT TabSeparated")
-
 	url := "http://" + clickhost + "/?" + params.Encode()
-	//fmt.Println(url)
 	r := bytes.NewReader([]byte(str))
 	resp, err := http.Post(url, "text/plain; charset=UTF-8", r)
 	if err != nil {
@@ -271,4 +303,55 @@ func dump() error {
 		return MethodError{error: resp.Status}
 	}
 	return nil
+}
+
+func get_name_tree(message json.RawMessage, id int) (json.RawMessage, error, int) {
+	jdata := NameTree{}
+	err := json.Unmarshal(message, &jdata)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err, id
+	}
+	prefix := jdata.Prefix
+	ntype := jdata.Ntype
+
+	fmt.Println(ntype)
+	var arr []string
+	params := url.Values{}
+	params.Add("query", "select distinct "+ntype+" from btp."+ntype+" where name='"+prefix+"' FORMAT JSONCompactStrings")
+	url := "http://" + clickhost + "/?" + params.Encode()
+
+	fmt.Println(url)
+
+	resp, err := http.Get(url)
+
+	if err != nil {
+		return nil, err, id
+	}
+	if resp.StatusCode != 200 {
+		return nil, MethodError{error: resp.Status}, id
+	}
+	defer resp.Body.Close()
+	out, _ := ioutil.ReadAll(resp.Body)
+
+	cdata := ClickLeaf{}
+	jerr := json.Unmarshal([]byte(string(out)), &cdata)
+
+	if jerr != nil {
+		fmt.Println(jerr)
+		return nil, jerr, id
+	}
+
+	for _, row := range cdata.Data {
+		arr = append(arr, row[0])
+	}
+
+	jout, _ := json.Marshal(NameTreeResult{arr})
+	return jout, err, id
+}
+
+func multi_get(message json.RawMessage, id int) (json.RawMessage, error, int) {
+	//sql := "select count()"
+	res, _ := json.Marshal("OK")
+	return res, nil, id
 }
