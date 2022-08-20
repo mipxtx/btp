@@ -13,6 +13,7 @@ services:
       - listner
     volumes:
       - ./logs/php:/var/log/
+      - ./btp-php/src:/btp-ui
   click:
     image: yandex/clickhouse-server
     volumes:
@@ -21,9 +22,9 @@ services:
       - 8123:8123
   listner:
     image: btp:mock
-    ports:
-      - 12345:12345
-      - 12345:12345/udp
+    #ports:
+    #  - 12345:12345
+    #  - 12345:12345/udp
     links:
       - click
     environment:

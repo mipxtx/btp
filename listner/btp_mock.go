@@ -82,10 +82,39 @@ func (m MethodError) Error() string {
 	return m.error
 }
 
+type GetRequest struct {
+	Name   string `json:"name"`
+	Ts     int64  `json:"ts"`
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+}
+type GetResult struct {
+	Name     string    `json:"name"`
+	Scale    int       `json:"scale"`
+	Counters [][]int64 `json:"counters"`
+}
+type MultiGetRequest struct {
+	Names  []string `json:"names"`
+	Ts     int64    `json:"ts"`
+	Offset int      `json:"offset"`
+	Limit  int      `json:"limit"`
+	Scale  int      `json:"scale"`
+}
+
+type MultiGetResult struct {
+	Scale int         `json:"scale"`
+	Data  []GetResult `json:"data"`
+}
+
 var data string = ""
 var btpMutex sync.Mutex
 
 var clickhost string = ""
+
+func Marshal(v any) json.RawMessage {
+	res, _ := json.Marshal(v)
+	return res
+}
 
 func main() {
 
@@ -230,15 +259,14 @@ func result(success json.RawMessage, err error, id int) json.RawMessage {
 		if id != 0 {
 			jsonError.Id = id
 		}
-		jsonResp, _ := json.Marshal(jsonError)
-		return jsonResp
+		return Marshal(jsonError)
 	} else {
 		jsonResult := Result{Jsonrpc: "2.0", Result: success}
 		if id != 0 {
 			jsonResult.Id = id
 		}
-		jsonResp, _ := json.Marshal(jsonResult)
-		return jsonResp
+
+		return Marshal(jsonResult)
 	}
 }
 
@@ -246,11 +274,8 @@ func processMulti(message json.RawMessage, id int) (json.RawMessage, error, int)
 	now := time.Now().Format("2006-01-02 15:04:05")
 	out := ""
 	jdata := MultiAdd{}
-	err := json.Unmarshal(message, &jdata)
-	if err != nil {
-		fmt.Println(err)
-		return nil, err, id
-	}
+	json.Unmarshal(message, &jdata)
+
 	for _, d := range jdata.Data {
 		name := ""
 		pices := strings.Split(d.Name, "~~")
@@ -271,8 +296,7 @@ func processMulti(message json.RawMessage, id int) (json.RawMessage, error, int)
 	data += out
 	btpMutex.Unlock()
 
-	succ, _ := json.Marshal("success")
-	return succ, err, id
+	return Marshal("success"), nil, id
 }
 
 func clickSend(id int) (json.RawMessage, error, int) {
@@ -281,8 +305,7 @@ func clickSend(id int) (json.RawMessage, error, int) {
 	if err != nil {
 		return nil, err, id
 	}
-	succ, _ := json.Marshal("success")
-	return succ, err, id
+	return Marshal("success"), err, id
 }
 
 func dump() error {
@@ -315,13 +338,10 @@ func get_name_tree(message json.RawMessage, id int) (json.RawMessage, error, int
 	prefix := jdata.Prefix
 	ntype := jdata.Ntype
 
-	fmt.Println(ntype)
 	var arr []string
 	params := url.Values{}
 	params.Add("query", "select distinct "+ntype+" from btp."+ntype+" where name='"+prefix+"' FORMAT JSONCompactStrings")
 	url := "http://" + clickhost + "/?" + params.Encode()
-
-	fmt.Println(url)
 
 	resp, err := http.Get(url)
 
@@ -335,23 +355,75 @@ func get_name_tree(message json.RawMessage, id int) (json.RawMessage, error, int
 	out, _ := ioutil.ReadAll(resp.Body)
 
 	cdata := ClickLeaf{}
-	jerr := json.Unmarshal([]byte(string(out)), &cdata)
-
-	if jerr != nil {
-		fmt.Println(jerr)
-		return nil, jerr, id
-	}
+	json.Unmarshal([]byte(string(out)), &cdata)
 
 	for _, row := range cdata.Data {
 		arr = append(arr, row[0])
 	}
 
-	jout, _ := json.Marshal(NameTreeResult{arr})
-	return jout, err, id
+	return Marshal(NameTreeResult{arr}), err, id
+}
+
+func processMultiget(names []string, scale int) ([]GetResult, error) {
+
+	fmt.Println(scale)
+
+	sql := "select concat(type,'~~',service,'~~',operation) as name," +
+		" toUnixTimestamp(toStartOfInterval(date, interval " + strconv.Itoa(scale) + " second)) * 1000000 as dt," +
+		" count() as cnt," +
+		" round(avg(time)) as avg," +
+		" round(quantile(0.5)(time)) as p50," +
+		" round(quantile(0.8)(time)) as p80," +
+		" round(quantile(0.95)(time)) as p95," +
+		" round(quantile(0.99)(time)) as p99," +
+		" min(time) as mi," +
+		" max(time) as ma" +
+		" from timer" +
+		" where name in ("
+
+	for i, val := range names {
+		if i != 0 {
+			sql += ","
+		}
+		sql += "'" + val + "'"
+	}
+	sql += ")" +
+		" group by dt, name" +
+		" order by name, dt"
+
+	fmt.Println(sql)
+	params := url.Values{}
+	params.Add("query", sql+"' FORMAT JSONCompactStrings")
+	url := "http://" + clickhost + "/?" + params.Encode()
+
+	resp, err := http.Get(url)
+
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, MethodError{error: resp.Status}
+	}
+	defer resp.Body.Close()
+	out, _ := ioutil.ReadAll(resp.Body)
+	fmt.Println(out)
+	return nil, MethodError{"Test"}
 }
 
 func multi_get(message json.RawMessage, id int) (json.RawMessage, error, int) {
-	//sql := "select count()"
-	res, _ := json.Marshal("OK")
-	return res, nil, id
+
+	req := MultiGetRequest{}
+	json.Unmarshal(message, &req)
+
+	fmt.Println(string(message))
+
+	mget, err := processMultiget(req.Names, req.Scale)
+	if err != nil {
+		return nil, err, id
+	}
+	out := MultiGetResult{}
+	out.Scale = req.Scale * 1000000
+	out.Data = mget
+
+	return Marshal(mget), nil, id
 }
