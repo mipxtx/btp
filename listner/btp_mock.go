@@ -30,7 +30,7 @@ type NameTree struct {
 	Power  bool   `json:"power"`
 }
 
-type ClickLeaf struct {
+type ClickResp struct {
 	Meta []struct {
 		Name string `json:"name"`
 		Type string `json:"type"`
@@ -87,18 +87,22 @@ type GetRequest struct {
 	Ts     int64  `json:"ts"`
 	Offset int    `json:"offset"`
 	Limit  int    `json:"limit"`
+	Scale  string `json:"scale"`
 }
 type GetResult struct {
 	Name     string    `json:"name"`
 	Scale    int       `json:"scale"`
 	Counters [][]int64 `json:"counters"`
 }
+
+type GetCounters [][]int64
+
 type MultiGetRequest struct {
 	Names  []string `json:"names"`
 	Ts     int64    `json:"ts"`
 	Offset int      `json:"offset"`
 	Limit  int      `json:"limit"`
-	Scale  int      `json:"scale"`
+	Scale  string   `json:"scale"`
 }
 
 type MultiGetResult struct {
@@ -106,15 +110,31 @@ type MultiGetResult struct {
 	Data  []GetResult `json:"data"`
 }
 
+type GetNamesRequest struct {
+	Prefix string `json:"prefix"`
+	Suffix string `json:"suffix"`
+	Sep    string `json:"sep"`
+	Offset int    `json:"offset"`
+	Limit  int    `json:"limit"`
+	Sortby string `json:"sortby"`
+	Power  bool   `json:"power"`
+	Scale  string `json:"scale"`
+}
+
+type GetNameResultItem struct {
+	Name string `json:"name"`
+	Ts   int64  `json:"ts"`
+}
+
+type GetNamesResult struct {
+	NamesTs []GetNameResultItem `json:"names_ts"`
+	Scale   int                 `json:"scale"`
+}
+
 var data string = ""
 var btpMutex sync.Mutex
 
 var clickhost string = ""
-
-func Marshal(v any) json.RawMessage {
-	res, _ := json.Marshal(v)
-	return res
-}
 
 func main() {
 
@@ -246,6 +266,10 @@ func serveMethod(buf []byte) json.RawMessage {
 		return result(get_name_tree(message.Params, message.Id))
 	case "multi_get":
 		return result(multi_get(message.Params, message.Id))
+	case "get":
+		return result(getGraph(message.Params, message.Id))
+	case "get_names":
+		return result(getNames(message.Params, message.Id))
 	default:
 		fmt.Println(string(buf))
 		return result(nil, MethodError{error: "method '" + message.Method + "' unknown"}, message.Id)
@@ -259,14 +283,15 @@ func result(success json.RawMessage, err error, id int) json.RawMessage {
 		if id != 0 {
 			jsonError.Id = id
 		}
-		return Marshal(jsonError)
+		js, _ := json.Marshal(jsonError)
+		return js
 	} else {
 		jsonResult := Result{Jsonrpc: "2.0", Result: success}
 		if id != 0 {
 			jsonResult.Id = id
 		}
-
-		return Marshal(jsonResult)
+		js, _ := json.Marshal(jsonResult)
+		return js
 	}
 }
 
@@ -296,7 +321,8 @@ func processMulti(message json.RawMessage, id int) (json.RawMessage, error, int)
 	data += out
 	btpMutex.Unlock()
 
-	return Marshal("success"), nil, id
+	js, _ := json.Marshal("success")
+	return js, nil, id
 }
 
 func clickSend(id int) (json.RawMessage, error, int) {
@@ -305,7 +331,9 @@ func clickSend(id int) (json.RawMessage, error, int) {
 	if err != nil {
 		return nil, err, id
 	}
-	return Marshal("success"), err, id
+	js, _ := json.Marshal("success")
+	return js, nil, id
+
 }
 
 func dump() error {
@@ -354,50 +382,187 @@ func get_name_tree(message json.RawMessage, id int) (json.RawMessage, error, int
 	defer resp.Body.Close()
 	out, _ := ioutil.ReadAll(resp.Body)
 
-	cdata := ClickLeaf{}
+	cdata := ClickResp{}
 	json.Unmarshal([]byte(string(out)), &cdata)
 
 	for _, row := range cdata.Data {
 		arr = append(arr, row[0])
 	}
 
-	return Marshal(NameTreeResult{arr}), err, id
+	js, _ := json.Marshal(NameTreeResult{arr})
+	return js, nil, id
 }
 
-func processMultiget(names []string, scale int) ([]GetResult, error) {
+func processMultiget(names []string, scale int) (MultiGetResult, error) {
 
-	fmt.Println(scale)
-
-	sql := "select concat(type,'~~',service,'~~',operation) as name," +
-		" toUnixTimestamp(toStartOfInterval(date, interval " + strconv.Itoa(scale) + " second)) * 1000000 as dt," +
-		" count() as cnt," +
-		" round(avg(time)) as avg," +
-		" round(quantile(0.5)(time)) as p50," +
-		" round(quantile(0.8)(time)) as p80," +
-		" round(quantile(0.95)(time)) as p95," +
-		" round(quantile(0.99)(time)) as p99," +
-		" min(time) as mi," +
-		" max(time) as ma" +
-		" from timer" +
-		" where name in ("
-
-	for i, val := range names {
-		if i != 0 {
-			sql += ","
-		}
-		sql += "'" + val + "'"
+	if len(names) < 1 {
+		return MultiGetResult{}, MethodError{"not enought names"}
 	}
-	sql += ")" +
-		" group by dt, name" +
-		" order by name, dt"
 
-	fmt.Println(sql)
-	params := url.Values{}
-	params.Add("query", sql+"' FORMAT JSONCompactStrings")
-	url := "http://" + clickhost + "/?" + params.Encode()
+	sql := ""
 
-	resp, err := http.Get(url)
+	if scale == 5 {
 
+		var sqlName string
+		var sqlWhere string
+		split := strings.Split(names[0], "~~")
+
+		if len(split) == 3 {
+			sqlName = " concat(type,'~~',service, '~~',operation) as name,"
+			sqlWhere = " AND server=''"
+		} else {
+			sqlName = " concat(type,'~~',service,'~~',server, '~~',operation) as name,"
+			sqlWhere = ""
+		}
+
+		sql = "select" +
+			sqlName +
+			" toUnixTimestamp(toStartOfInterval(date, interval 5 second)) * 1000000 as dt," +
+			" round(avg(time)) as avg," +
+			" count() as cnt," +
+			" round(quantile(0.49)(time)) as p50," +
+			" round(quantile(0.79)(time)) as p80," +
+			" round(quantile(0.94)(time)) as p95," +
+			" round(quantile(0.98)(time)) as p99," +
+			" round(quantile(0.99)(time)) as p100," +
+			" min(time) as mi," +
+			" max(time) as ma" +
+			" from btp.timer" +
+			" where name in ("
+
+		for i, val := range names {
+			if i != 0 {
+				sql += ","
+			}
+			sql += "'" + val + "'"
+		}
+		sql += ")"
+		sql += sqlWhere
+		sql += " group by dt, name order by name, dt"
+	} else {
+		sql = "select" +
+			" name," +
+			" time," +
+			" cnt," +
+			" avg," +
+			" p50," +
+			" p80," +
+			" p95," +
+			" p99," +
+			" min," +
+			" max" +
+			" from btp.counters" +
+			" where name in ("
+
+		for i, val := range names {
+			if i != 0 {
+				sql += ","
+			}
+			sql += "'" + val + "'"
+		}
+		sql += ")" +
+			" AND scale=" + strconv.Itoa(scale) +
+			" order by name, time"
+	}
+
+	//fmt.Println(sql)
+	res, _ := clickSelect(sql)
+
+	clickRes := make(map[string]GetCounters)
+
+	for _, s := range res {
+		name := s[0]
+		value := make([]int64, 10)
+		for i := 0; i < 10; i++ {
+			j, _ := strconv.Atoi(s[i+1])
+			value[i] = int64(j)
+		}
+
+		clickRes[name] = append(clickRes[name], value)
+	}
+
+	out := MultiGetResult{}
+	out.Scale = scale * 1000000
+	for name, data := range clickRes {
+		item := GetResult{}
+		item.Name = name
+		item.Counters = data
+		item.Scale = scale * 1000000
+		out.Data = append(out.Data, item)
+	}
+
+	return out, nil
+}
+
+func multi_get(message json.RawMessage, id int) (json.RawMessage, error, int) {
+
+	req := MultiGetRequest{}
+	json.Unmarshal(message, &req)
+
+	scale, _ := strconv.Atoi(req.Scale)
+
+	if scale < 1 {
+		return nil, MethodError{"scale must be > 0"}, id
+	}
+
+	mget, err := processMultiget(req.Names, scale)
+	if err != nil {
+		return nil, err, id
+	}
+
+	js, _ := json.Marshal(mget)
+	return js, nil, id
+}
+
+func getGraph(message json.RawMessage, id int) (json.RawMessage, error, int) {
+	req := GetRequest{}
+	json.Unmarshal(message, &req)
+	scale, _ := strconv.Atoi(req.Scale)
+
+	names := make([]string, 1)
+	names[0] = req.Name
+
+	res, _ := processMultiget(names, scale)
+
+	var data GetResult
+	if len(res.Data) > 0 {
+		data = res.Data[0]
+	} else {
+		data = GetResult{}
+	}
+	jres, _ := json.Marshal(data)
+	return jres, nil, id
+}
+
+func getNames(message json.RawMessage, id int) (json.RawMessage, error, int) {
+	req := GetNamesRequest{}
+	json.Unmarshal(message, &req)
+
+	pref := strings.Split(req.Prefix, "~~")
+	suff := strings.Split(req.Suffix, "~~")
+
+	sql := "select concat (type,'~~',service,'~~',server,'~~',operation) as name, toUnixTimestamp(max(date)) time" +
+		" from btp.timer" +
+		" where type='" + pref[0] + "' and server='" + suff[1] + "' and operation='" + suff[2] + "'" +
+		" and date > now() - interval 1 day" +
+		" group by name"
+
+	cres, _ := clickSelect(sql)
+	out := make([]GetNameResultItem, len(cres))
+
+	for i, name := range cres {
+		ts, _ := strconv.Atoi(name[1])
+		out[i].Name = name[0]
+		out[i].Ts = int64(ts * 1000000)
+	}
+	scale, _ := strconv.Atoi(req.Scale)
+	jout, _ := json.Marshal(GetNamesResult{out, scale * 1000000})
+	return jout, nil, id
+}
+
+func clickSelect(sql string) ([][]string, error) {
+	r := bytes.NewReader([]byte(sql + " FORMAT JSONCompactStrings"))
+	resp, err := http.Post("http://"+clickhost, "text/sql", r)
 	if err != nil {
 		return nil, err
 	}
@@ -406,24 +571,13 @@ func processMultiget(names []string, scale int) ([]GetResult, error) {
 	}
 	defer resp.Body.Close()
 	out, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println(out)
-	return nil, MethodError{"Test"}
-}
 
-func multi_get(message json.RawMessage, id int) (json.RawMessage, error, int) {
+	cresp := ClickResp{}
+	jerr := json.Unmarshal(out, &cresp)
 
-	req := MultiGetRequest{}
-	json.Unmarshal(message, &req)
-
-	fmt.Println(string(message))
-
-	mget, err := processMultiget(req.Names, req.Scale)
-	if err != nil {
-		return nil, err, id
+	if jerr != nil {
+		return nil, jerr
 	}
-	out := MultiGetResult{}
-	out.Scale = req.Scale * 1000000
-	out.Data = mget
 
-	return Marshal(mget), nil, id
+	return cresp.Data, nil
 }
