@@ -18,6 +18,8 @@ services:
     image: yandex/clickhouse-server
     volumes:
       - ./click_data:/var/lib/clickhouse
+      - ./clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh
+      - ./logs/click:/var/log/clickhouse-server
     ports:
       - 8123:8123
   listner:
