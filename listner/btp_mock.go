@@ -353,7 +353,24 @@ func dump() error {
 	if resp.StatusCode != 200 {
 		return MethodError{error: resp.Status}
 	}
+
+	clickUpdate("truncate table btp.branch")
+	clickUpdate("insert into btp.branch select distinct type, service from btp.timer where date > now() - interval 5*3000 second")
+	clickUpdate("insert into btp.branch select distinct concat(type,'~~',service), server from btp.timer where server != '' AND date > now() - interval 5*3000 second")
+	clickUpdate("truncate table btp.leaf")
+	clickUpdate("insert into btp.leaf select distinct concat(type,'~~',service), operation from btp.timer where operation != '' AND date > now() - interval 5*3000 second")
+	clickUpdate("insert into btp.leaf select distinct concat(type,'~~',service, '~~', server), operation from btp.timer where server != '' AND operation != '' AND date > now() - interval 5*3000 second")
 	return nil
+}
+
+func clickUpdate(sql string) {
+	r := bytes.NewReader([]byte(sql))
+	resp, _ := http.Post("http://"+clickhost, "text/sql", r)
+	if resp.StatusCode != 200 {
+		defer resp.Body.Close()
+		out, _ := ioutil.ReadAll(resp.Body)
+		fmt.Println("dump error: " + strconv.Itoa(resp.StatusCode) + "\n" + string(out))
+	}
 }
 
 func get_name_tree(message json.RawMessage, id int) (json.RawMessage, error, int) {
