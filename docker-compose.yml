@@ -13,7 +13,7 @@ services:
       - listner
     volumes:
       - ./logs/php:/var/log/
-      - ./btp-php/src:/btp-ui
+      #- ./btp-php/src:/btp-ui
   click:
     image: yandex/clickhouse-server
     volumes:
