@@ -4,5 +4,5 @@ mkdir logs
 mkdir logs/php
 mkdir logs/nginx
 docker build --tag btp:php btp-php
-docker build --tag btp:mock listner
-docker-compose up
+docker build --tag btp:listner listner
+docker-compose up -d
