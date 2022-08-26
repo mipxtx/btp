@@ -2,30 +2,7 @@
 set -e
 
 clickhouse client -n <<-EOSQL
-	CREATE DATABASE IF NOT EXISTS btp;
-	create table IF NOT EXISTS btp.branch
-  (
-      name   String,
-      branch String
-  )
-      engine = AggregatingMergeTree ORDER BY (name, branch)
-          SETTINGS index_granularity = 8192;
-  create table IF NOT EXISTS btp.leaf
-  (
-      name String,
-      leaf String
-  )
-      engine = AggregatingMergeTree ORDER BY (name, leaf)
-          SETTINGS index_granularity = 8192;
-
-create table IF NOT EXISTS  btp.names
-(
-    prefix String,
-    suffix String,
-    name   String
-)
-    engine = AggregatingMergeTree ORDER BY (prefix, suffix, name)
-        SETTINGS index_granularity = 8192;
+create database IF NOT EXISTS btp;
 
 create table IF NOT EXISTS btp.timer
 (

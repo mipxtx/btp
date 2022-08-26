@@ -354,12 +354,6 @@ func dump() error {
 		return MethodError{error: resp.Status}
 	}
 
-	clickUpdate("truncate table btp.branch")
-	clickUpdate("insert into btp.branch select distinct type, service from btp.timer where date > now() - interval 5*3000 second")
-	clickUpdate("insert into btp.branch select distinct concat(type,'~~',service), server from btp.timer where server != '' AND date > now() - interval 5*3000 second")
-	clickUpdate("truncate table btp.leaf")
-	clickUpdate("insert into btp.leaf select distinct concat(type,'~~',service), operation from btp.timer where operation != '' AND date > now() - interval 5*3000 second")
-	clickUpdate("insert into btp.leaf select distinct concat(type,'~~',service, '~~', server), operation from btp.timer where server != '' AND operation != '' AND date > now() - interval 5*3000 second")
 	return nil
 }
 
@@ -383,9 +377,36 @@ func get_name_tree(message json.RawMessage, id int) (json.RawMessage, error, int
 	prefix := jdata.Prefix
 	ntype := jdata.Ntype
 
-	var arr []string
+	pices := strings.Split(prefix, "~~")
+
+	sql := ""
+	switch true {
+	case len(pices) == 1:
+		sql = "select distinct service from timer where type='" + pices[0] + "'" +
+			" and date > now() - interval 5*3000 second"
+	case len(pices) == 2 && ntype == "branch":
+		sql = "select distinct server from timer where type='" + pices[0] + "'" +
+			" and service='" + pices[1] + "'" +
+			" and server!=''" +
+			" and date > now() - interval 5*3000 second"
+	case len(pices) == 2 && ntype == "leaf":
+		sql = "select distinct operation from timer where type='" + pices[0] + "'" +
+			" and service='" + pices[1] + "'" +
+			" and operation!=''" +
+			" and date > now() - interval 5*3000 second"
+	case len(pices) == 3 && ntype == "leaf":
+		sql = "select distinct operation from timer where type='" + pices[0] + "'" +
+			" and service='" + pices[1] + "'" +
+			" and server='" + pices[2] + "'" +
+			" and date > now() - interval 5*3000 second"
+	default:
+		fmt.Println("request " + prefix + " at " + ntype)
+	}
+
+	fmt.Println(sql)
 	params := url.Values{}
-	params.Add("query", "select distinct "+ntype+" from btp."+ntype+" where name='"+prefix+"' FORMAT JSONCompactStrings")
+	params.Add("query", sql+" FORMAT JSONCompactStrings")
+	params.Add("database", "btp")
 	url := "http://" + clickhost + "/?" + params.Encode()
 
 	resp, err := http.Get(url)
@@ -402,6 +423,7 @@ func get_name_tree(message json.RawMessage, id int) (json.RawMessage, error, int
 	cdata := ClickResp{}
 	json.Unmarshal([]byte(string(out)), &cdata)
 
+	var arr []string
 	for _, row := range cdata.Data {
 		arr = append(arr, row[0])
 	}
