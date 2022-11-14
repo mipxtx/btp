@@ -1,29 +1,36 @@
 services:
-  btp-front:
-    build: btp-front
-    ports:
-      - "80:80"
-    links:
-      - btp-php
-    volumes:
-      - ./logs/nginx:/var/log/nginx
-  btp-php:
-    image: btp:php
-    links:
-      - listner
-    volumes:
-      - ./logs/php:/var/log/
-      #- ./btp-php/src:/btp-ui
   click:
     image: yandex/clickhouse-server
     volumes:
       - ./click_data:/var/lib/clickhouse
-      - ./clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh
       - ./logs/click:/var/log/clickhouse-server
+      - ./clickhouse/my-config.xml:/etc/clickhouse-server/config.d/my-config.xml
+      - ./clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh
+    platform: linux/amd64
     ports:
       - 8123:8123
+  web:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./btp-ui:/btp-ui
+      - ./nginx/site.conf:/etc/nginx/conf.d/default.conf
+      - ./logs/nginx:/var/log/nginx
+    links:
+      - php
+      - click
+  php:
+    image: php:7-fpm
+    volumes:
+      - ./btp-ui:/btp-ui
+      - ./logs/php:/var/log/
+      - ./php/php.ini:/usr/local/etc/php/php.ini
+      - ./php/docker.conf:/usr/local/etc/php-fpm.d/docker.conf
   listner:
     image: btp:listner
+    volumes:
+      - ./listner/src:/go/src
     ports:
       - 12345:12345
       - 12345:12345/udp
@@ -31,5 +38,5 @@ services:
       - click
     environment:
       - "CLICK=click:8123"
-      - "DUMP_TIMEOUT=15"
+      - "DUMP_TIMEOUT=5"
 

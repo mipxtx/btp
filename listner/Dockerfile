@@ -1,7 +1,14 @@
 FROM golang:1.8
 
-COPY . .
-RUN go build -v -o /usr/local/bin/app ./...
-RUN chmod +x /usr/local/bin/app
 EXPOSE 12345
-CMD ["/usr/local/bin/app"]
+
+
+
+#COPY ./src/* .
+#RUN go build -v -o /usr/local/bin/app ./...
+#RUN chmod +x /usr/local/bin/app
+
+RUN mkdir /start
+COPY ./startup.sh /start
+RUN chmod +x /start/startup.sh
+ENTRYPOINT ["/start/startup.sh"]
