@@ -8,28 +8,25 @@ services:
     volumes:
       - ./logs/nginx:/var/log/nginx
   btp-php:
-    image: btp:php
+    build: btp-php
     links:
-      - listner
+      - btpd
     volumes:
       - ./logs/php:/var/log/
       #- ./btp-php/src:/btp-ui
-  click:
-    image: yandex/clickhouse-server
+  btpd:
+    image: mipxtx/btpd:arm
     volumes:
-      - ./click_data:/var/lib/clickhouse
-      - ./clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh
-      - ./logs/click:/var/log/clickhouse-server
+      - ./btpd/run.sh:/btpd/run.sh
+      - ./logs/btpd/:/btpd/logs/
+      - ./storage:/btpd/storage
     ports:
-      - 8123:8123
-  listner:
-    image: btp:listner
-    ports:
-      - 12345:12345
-      - 12345:12345/udp
-    links:
-      - click
-    environment:
-      - "CLICK=click:8123"
-      - "DUMP_TIMEOUT=15"
-
+      - 37000:37000
+      - 37001:37001
+      - 37002:37002
+      - 37003:37003
+      - 37004:37004
+      - 38000:38000
+      - 38000:38000/udp
+      - 38001:38001
+      - 38001:38001/udp

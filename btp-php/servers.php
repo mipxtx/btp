@@ -6,15 +6,15 @@
  * Time: 16:30
  */
 
-$host= 'listner';
+$host= 'btpd';
 
 return [
     'production' => [
-        '5' => [['host' => $host, 'port' => 12345]],
-        '60' => [['host' => $host, 'port' => 12345]],
-        '420' => [['host' => $host, 'port' => 12345]],
-        '3600' => [['host' => $host, 'port' => 12345]],
-        '86400' => [['host' => $host, 'port' => 12345]],
+        '5' => [['host' => $host, 'port' => 37000]],
+        '60' => [['host' => $host, 'port' => 37001]],
+        '420' => [['host' => $host, 'port' => 37002]],
+        '3600' => [['host' => $host, 'port' => 37003]],
+        '86400' => [['host' => $host, 'port' => 37004]],
     ],
 ];
 
