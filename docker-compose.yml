@@ -1,14 +1,14 @@
 services:
   btp-front:
-    build: btp-front
+    image: mipxtx/btp.front
     ports:
-      - "80:80"
+      - "8080:80"
     links:
       - btp-php
     volumes:
       - ./logs/nginx:/var/log/nginx
   btp-php:
-    build: btp-php
+    image: mipxtx/btp.php
     links:
       - btpd
     volumes:
