@@ -162,7 +162,9 @@ static HashTable* btp_server_dump(zval *dst, btp_server_t *server)
 {
   add_assoc_stringl(dst, "host", ZSTR_VAL(server->host), ZSTR_LEN(server->host));
   add_assoc_stringl(dst, "port", ZSTR_VAL(server->port), ZSTR_LEN(server->port));
+  add_index_long(dst, "fmt", server->format_id);
   add_assoc_bool(dst, "is_connected", server->socket > 0);
+
 }
 
 static zend_always_inline btp_server_t* btp_server_get_cached(zend_string *host, zend_string *port, zend_long format_id)
@@ -578,9 +580,11 @@ static HashTable* btp_timer_dump(zval *dst, btp_timer_t *timer)
 
 #define OPENER "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"channel\":\"btp2.rt\",\"content\":["
 #define OPENER_V2 "{\"jsonrpc\":\"2.0\",\"method\":\"multi_add\",\"params\":{\"data\":["
+#define OPENER_V3 "{\"jsonrpc\":\"2.0\",\"method\":\"multi_push\",\"params\":{\"data\":["
 #define CLOSER "]}}\r\n"
 #define ITEM_OPEN "{\"name\":\""
 #define ITEM_CL "\",\"cl\":["
+#define ITEM_DATA "\",\"count\":1,\"data\":["
 #define ITEM_CLOSE "]}"
 #define COMMA ','
 #define COMMA_LEN 1
@@ -683,8 +687,13 @@ static void btp_request_prepare_and_send(btp_server_t *server)
     preq = btp_memcpy(request_buffer, OPENER_V2, strlen(OPENER_V2));
     left_max -= strlen(OPENER_V2);
   } else {
-    preq = btp_memcpy(request_buffer, OPENER, strlen(OPENER));
-    left_max -= strlen(OPENER);
+    if(EXPECTED(server->format_id == BTP_FORMAT_V3)){
+        preq = btp_memcpy(request_buffer, OPENER_V3, strlen(OPENER_V3));
+        left_max -= strlen(OPENER_V3);
+    }else{
+        preq = btp_memcpy(request_buffer, OPENER, strlen(OPENER));
+        left_max -= strlen(OPENER);
+    }
   }
 
   left_max -= strlen(CLOSER);
@@ -695,8 +704,12 @@ static void btp_request_prepare_and_send(btp_server_t *server)
   zend_string *key;
   ZEND_HASH_FOREACH_STR_KEY_VAL(&server->send_buffer, key, values) {
     zval *value;
-    unsigned klen = strlen(ITEM_OPEN) + strlen(ITEM_CL) + strlen(ITEM_CLOSE) + ZSTR_LEN(key);
-
+    unsigned klen;
+    if(EXPECTED(server->format_id == BTP_FORMAT_V3)){
+        klen = strlen(ITEM_OPEN) + strlen(ITEM_DATA) + strlen(ITEM_CLOSE) + ZSTR_LEN(key);
+    } else {
+        klen = strlen(ITEM_OPEN) + strlen(ITEM_CL) + strlen(ITEM_CLOSE) + ZSTR_LEN(key);
+    }
     if (UNEXPECTED(klen > left_max / 2)) {
       php_error_docref(NULL, E_WARNING, "btp key %s is too large - more than half of max packet payload length", ZSTR_VAL(key));
       goto __skip_key;
@@ -708,7 +721,11 @@ static void btp_request_prepare_and_send(btp_server_t *server)
 __continue_key:
     pend = btp_memcpy(pend, ITEM_OPEN, strlen(ITEM_OPEN));
     pend = btp_memcpy(pend, ZSTR_VAL(key), ZSTR_LEN(key));
-    pend = btp_memcpy(pend, ITEM_CL, strlen(ITEM_CL));
+    if(EXPECTED(server->format_id == BTP_FORMAT_V3)){
+        pend = btp_memcpy(pend, ITEM_DATA, strlen(ITEM_DATA));
+    }else{
+        pend = btp_memcpy(pend, ITEM_CL, strlen(ITEM_CL));
+    }
     left -= klen;
 
     ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(values), value) {
@@ -1348,6 +1365,7 @@ static void btp_register_constants(INIT_FUNC_ARGS)
 {
   REGISTER_LONG_CONSTANT("BTP_FORMAT_V1", BTP_FORMAT_V1, BTP_CONSTANT_FLAGS);
   REGISTER_LONG_CONSTANT("BTP_FORMAT_V2", BTP_FORMAT_V2, BTP_CONSTANT_FLAGS);
+  REGISTER_LONG_CONSTANT("BTP_FORMAT_V3", BTP_FORMAT_V3, BTP_CONSTANT_FLAGS);
 }
 
 const zend_function_entry btp_functions[] = {

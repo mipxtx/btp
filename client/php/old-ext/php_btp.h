@@ -38,9 +38,10 @@ extern zend_module_entry btp_module_entry;
 
 #define BTP_FORMAT_V1 0
 #define BTP_FORMAT_V2 1
+#define BTP_FORMAT_V3 2
 
 #define BTP_FORMAT_VMIN  BTP_FORMAT_V1
-#define BTP_FORMAT_VMAX  BTP_FORMAT_V2
+#define BTP_FORMAT_VMAX  BTP_FORMAT_V3
 #define BTP_FORMAT_DEFAULT  BTP_FORMAT_V2
 
 #define BTP_CONSTANT_FLAGS (CONST_CS | CONST_PERSISTENT)
