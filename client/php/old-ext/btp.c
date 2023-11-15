@@ -866,17 +866,16 @@ static zend_always_inline void globals_module_init()
     hostgroup[len++] = *src;
   }
 
-  BTP_G(globals_cnt_all)   = zend_string_alloc(len + strlen("SCRIPT_"), 1);
-  BTP_G(globals_cnt_total) = zend_string_alloc(len + strlen("SCRIPT_total_"), 1);
+  BTP_G(globals_cnt_all)   = zend_string_alloc(strlen("SCRIPT"), 1);
 
   src = ZSTR_VAL(BTP_G(globals_cnt_all));
-  src = btp_memcpy(src, "SCRIPT_", strlen("SCRIPT_"));
-        btp_memcpy(src, hostgroup, len);
-
+  src = btp_memcpy(src, "SCRIPT", strlen("SCRIPT"));
+        //btp_memcpy(src, hostgroup, len);
+/*
   src = ZSTR_VAL(BTP_G(globals_cnt_total));
   src = btp_memcpy(src, "SCRIPT_total_", strlen("SCRIPT_total_"));
         btp_memcpy(src, hostgroup, len);
-
+*/
   BTP_G(globals_op_memory) = zend_string_init("memory", strlen("memory"), 1);
   BTP_G(globals_op_all)    = zend_string_init("all", strlen("all"), 1);
 
@@ -896,7 +895,6 @@ static zend_always_inline void globals_module_shutdown()
 
   zend_string_free(BTP_G(globals_server));
   zend_string_free(BTP_G(globals_cnt_all));
-  zend_string_free(BTP_G(globals_cnt_total));
 }
 
 static zend_always_inline void globals_request_init()
@@ -939,7 +937,7 @@ static void globals_send(zend_string *service)
   timer.value.tv_usec = zend_memory_peak_usage(1);
 
   timer.service = service;
-  btp_timer_to_server(&timer);
+  //btp_timer_to_server(&timer);
 
   zend_string *project_name = globals_get_project_name(service);
   timer.service = project_name;
@@ -952,7 +950,7 @@ static void globals_send(zend_string *service)
     timersub(&req_finish, &BTP_G(globals_req_start), &timer.value);
 
     timer.service = service;
-    btp_timer_to_server(&timer);
+    //btp_timer_to_server(&timer);
 
     timer.service = project_name;
     btp_timer_to_server(&timer);
@@ -964,13 +962,12 @@ static void globals_send(zend_string *service)
 
 static int btp_send_headers_cb(sapi_headers_struct *sapi_headers)
 {
-  globals_send(BTP_G(globals_cnt_all));
   return send_headers_cb ? send_headers_cb(sapi_headers) : SAPI_HEADER_DO_SEND;
 }
 
 static zend_always_inline void globals_request_shutdown()
 {
-  globals_send(BTP_G(globals_cnt_total));
+  globals_send(BTP_G(globals_cnt_all));
   zend_hash_clean(&BTP_G(globals_hosts_ids));
 }
 

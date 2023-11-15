@@ -15,7 +15,7 @@ services:
       - ./logs/php:/var/log/
       #- ./btp-php/src:/btp-ui
   btpd:
-    image: mipxtx/btpd:arm
+    image: mipxtx/btpd
     volumes:
       - ./btpd/run.sh:/btpd/run.sh
       - ./logs/btpd/:/btpd/logs/
