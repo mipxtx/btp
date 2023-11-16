@@ -3,3 +3,4 @@ click_data
 btp-php/src
 logs/
 debug/
+storage/
