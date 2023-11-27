@@ -17,7 +17,6 @@ services:
   btpd:
     image: mipxtx/btpd
     volumes:
-      - ./btpd/run.sh:/btpd/run.sh
       - ./logs/btpd/:/btpd/logs/
       - ./storage:/btpd/storage
     ports:
