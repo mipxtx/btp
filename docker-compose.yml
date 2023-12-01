@@ -18,7 +18,7 @@ services:
     image: mipxtx/btpd
     volumes:
       - ./logs/btpd/:/btpd/logs/
-      - ./storage:/btpd/storage
+      - ./storage:/btpd/btp/storage
     ports:
       - 37000:37000
       - 37001:37001
