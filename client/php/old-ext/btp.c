@@ -584,8 +584,10 @@ static HashTable* btp_timer_dump(zval *dst, btp_timer_t *timer)
 #define CLOSER "]}}\r\n"
 #define ITEM_OPEN "{\"name\":\""
 #define ITEM_CL "\",\"cl\":["
-#define ITEM_DATA "\",\"count\":1,\"data\":["
-#define ITEM_CLOSE "]}"
+#define ITEM_DATA "\",\"data\":["
+#define ITEM_CL_CLOSE "]"
+#define ITEM_DATA_CLOSE "],\"count\":"
+#define ITEM_CLOSE "}"
 #define COMMA ','
 #define COMMA_LEN 1
 
@@ -705,10 +707,13 @@ static void btp_request_prepare_and_send(btp_server_t *server)
   ZEND_HASH_FOREACH_STR_KEY_VAL(&server->send_buffer, key, values) {
     zval *value;
     unsigned klen;
+
+    klen =  strlen(ITEM_OPEN) + ZSTR_LEN(key) + strlen(ITEM_CLOSE);
+
     if(EXPECTED(server->format_id == BTP_FORMAT_V3)){
-        klen = strlen(ITEM_OPEN) + strlen(ITEM_DATA) + strlen(ITEM_CLOSE) + ZSTR_LEN(key);
+        klen += strlen(ITEM_DATA) + strlen(ITEM_DATA_CLOSE);
     } else {
-        klen = strlen(ITEM_OPEN) + strlen(ITEM_CL) + strlen(ITEM_CLOSE) + ZSTR_LEN(key);
+        klen += strlen(ITEM_CL) + strlen(ITEM_CL_CLOSE);
     }
     if (UNEXPECTED(klen > left_max / 2)) {
       php_error_docref(NULL, E_WARNING, "btp key %s is too large - more than half of max packet payload length", ZSTR_VAL(key));
@@ -728,15 +733,31 @@ __continue_key:
     }
     left -= klen;
 
+    int cnt = 0;
     ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(values), value) {
       char vtmp[ BTP_MAX_INT_STRLEN ];
       char *vend = vtmp + sizeof(vtmp) - 1;
       char *vptr = zend_print_ulong_to_buf(vend, Z_LVAL_P(value));
       unsigned vlen = vend - vptr;
+      cnt++;
 
       if (UNEXPECTED(left < vlen + COMMA_LEN)) {
+        if(EXPECTED(server->format_id == BTP_FORMAT_V3)){
+          pend = btp_memcpy(--pend, ITEM_DATA_CLOSE, strlen(ITEM_DATA_CLOSE));
+          pend++;
+          char vcnt[ BTP_MAX_INT_STRLEN ];
+          sprintf(vcnt,"%d", cnt);
+          pend = btp_memcpy(--pend, vcnt, strlen(vcnt));
+          pend++;
+        } else {
+          pend = btp_memcpy(--pend, ITEM_CL_CLOSE, strlen(ITEM_CL_CLOSE));
+          pend++;
+        }
+
         pend = btp_memcpy(--pend, ITEM_CLOSE, strlen(ITEM_CLOSE));
         pend++;
+
+
 
 __send_continue_key:
         pend = btp_memcpy(--pend, CLOSER, strlen(CLOSER));
@@ -752,6 +773,18 @@ __send_continue_key:
 
       ZVAL_UNDEF(value);
     } ZEND_HASH_FOREACH_END();
+
+    if(EXPECTED(server->format_id == BTP_FORMAT_V3)){
+      pend = btp_memcpy(--pend, ITEM_DATA_CLOSE, strlen(ITEM_DATA_CLOSE));
+      pend++;
+      char vcnt[ BTP_MAX_INT_STRLEN ];
+      sprintf(vcnt,"%d", cnt);
+      pend = btp_memcpy(--pend, vcnt, strlen(vcnt));
+      pend++;
+    } else {
+      pend = btp_memcpy(--pend, ITEM_CL_CLOSE, strlen(ITEM_CL_CLOSE));
+      pend++;
+    }
 
     pend = btp_memcpy(--pend, ITEM_CLOSE, strlen(ITEM_CLOSE));
     *pend++ = COMMA;
