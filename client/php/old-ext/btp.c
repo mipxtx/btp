@@ -162,7 +162,7 @@ static HashTable* btp_server_dump(zval *dst, btp_server_t *server)
 {
   add_assoc_stringl(dst, "host", ZSTR_VAL(server->host), ZSTR_LEN(server->host));
   add_assoc_stringl(dst, "port", ZSTR_VAL(server->port), ZSTR_LEN(server->port));
-  add_index_long(dst, "fmt", server->format_id);
+  //add_index_long(dst, "fmt", server->format_id);
   add_assoc_bool(dst, "is_connected", server->socket > 0);
 
 }
@@ -597,7 +597,7 @@ static zend_always_inline HashTable* btp_timers_add_array_for_key(HashTable *has
 
   if (EXPECTED(res == NULL)) {
     zval zres;
-    ZVAL_NEW_ARR(&zres);
+    array_init(&zres);
     zend_hash_init(Z_ARRVAL(zres), 0, NULL, NULL, 0);
 
     zend_string *zkey = zend_string_init(key, key_len, 0);
@@ -1398,19 +1398,22 @@ static void btp_register_constants(INIT_FUNC_ARGS)
   REGISTER_LONG_CONSTANT("BTP_FORMAT_V3", BTP_FORMAT_V3, BTP_CONSTANT_FLAGS);
 }
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_void, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
 const zend_function_entry btp_functions[] = {
-  PHP_FE(btp_config_server_set, NULL)
-  PHP_FE(btp_config_server_pool, NULL)
-  PHP_FE(btp_dump, NULL)
-  PHP_FE(btp_dump_timer, NULL)
-  PHP_FE(btp_script_name_set, NULL)
-  PHP_FE(btp_project_name_set, NULL)
-  PHP_FE(btp_timer_start, NULL)
-  PHP_FE(btp_timer_stop, NULL)
-  PHP_FE(btp_flush, NULL)
-  PHP_FE(btp_timer_count, NULL)
-  PHP_FE(btp_timer_count_script, NULL)
-  PHP_FE(btp_timer_set_operation, NULL)
+  PHP_FE(btp_config_server_set, arginfo_void)
+  PHP_FE(btp_config_server_pool, arginfo_void)
+  PHP_FE(btp_dump, arginfo_void)
+  PHP_FE(btp_dump_timer, arginfo_void)
+  PHP_FE(btp_script_name_set, arginfo_void)
+  PHP_FE(btp_project_name_set, arginfo_void)
+  PHP_FE(btp_timer_start, arginfo_void)
+  PHP_FE(btp_timer_stop, arginfo_void)
+  PHP_FE(btp_flush, arginfo_void)
+  PHP_FE(btp_timer_count, arginfo_void)
+  PHP_FE(btp_timer_count_script, arginfo_void)
+  PHP_FE(btp_timer_set_operation, arginfo_void)
   PHP_FE_END
 };
 
